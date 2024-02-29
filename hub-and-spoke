@@ -1,0 +1,161 @@
+Using WireGuard for Hub and Spoke Site-to-Site VPN
+
+For all nodes 
+
+Step 1: update and upgrade system
+apt update ; apt upgrade -y
+
+Step 2: Install Wireguard
+apt install wireguard -y
+
+Step 3
+cd /etc/wireguard ; umask 077
+wg genkey | tee privatekey | wg pubkey > publickey
+
+cat privatekey
+cat publickey
+
+// Info Tools //
+--------------------
+privatekey = iDn//hiOBGPLkFb7JmyViVVfxufE0hguoVMBa+J7hGA=
+publickey = Xptm2lVsakGSD22fY/S6nbz4dOxGMxw07IXvV/8anFc=
+
+eth0: 188.166.26.176/18
+eth1: 10.10.10.2/24
+
+// Info Mail //
+--------------------
+privatekey = CGtTOFarkzVepN8ZfjRK9FV5+aeXy1+g03rr+NTH/VQ=
+publickey = mvbs6ZRgrz1sf/q0mtoFTjUlOnk/vSaFw1RqB5y0nnA=
+
+eth0: 188.166.6.163/18
+eth1: 10.10.20.2/24
+
+// Info Apps //
+--------------------
+privatekey = KMjqHgvE+PE7h6FjiNeYWDyydTPLLouNzsJq/Du6tUw=
+publickey = AYNDzB1fqxCmBe7pdKZ6w7G2ln6TziBqDxKiZhDZ600=
+
+eth0: 188.166.36.75/18
+eth1: 10.10.30.2/24
+
+
+Step 4: Set up point to point link between Hub and Spoke1
+
+For node Tools
+cd /et/wireguard
+vim wg0.conf
+
+#Tools
+[Interface]
+PrivateKey = iDn//hiOBGPLkFb7JmyViVVfxufE0hguoVMBa+J7hGA=
+ListenPort = 60031
+
+#Mail
+[Peer]
+PublicKey = mvbs6ZRgrz1sf/q0mtoFTjUlOnk/vSaFw1RqB5y0nnA=
+EndPoint = 188.166.6.163:60031
+AllowedIPs = 0.0.0.0/0
+
+For node Mail
+cd /et/wireguard
+vim wg0.conf
+
+#Mail
+[Interface]
+PrivateKey = CGtTOFarkzVepN8ZfjRK9FV5+aeXy1+g03rr+NTH/VQ=
+ListenPort = 60031
+
+#Tools
+[Peer]
+PublicKey = Xptm2lVsakGSD22fY/S6nbz4dOxGMxw07IXvV/8anFc=
+Endpoint = 188.166.26.176:60031
+AllowedIPs = 0.0.0.0/0
+
+
+Step 5: Add wg interface on both Tools and Mail
+ip link add dev wg0 type wireguard
+ip a s dev wg0
+
+For Tools
+ip a add 169.254.0.1 peer 169.254.0.2 dev wg0
+ip -br a s dev wg0
+wg setconf wg0 wg0.conf
+ip link set wg0 up
+
+For Mail
+ip a add 169.254.0.2 peer 169.254.0.1 dev wg0
+ip -br a s dev wg0
+wg setconf wg0 wg0.conf
+ip link set wg0 up
+
+Step 6: Check if we can ping this
+Tools: ping 169.254.0.2
+Mail: ping 169.254.0.1
+
+
+Step 7: Set up point to point link between Tools and Apps
+
+// First config the Hub //
+cp wg0.conf wg1.conf
+
+#Hub
+[Interface]
+PrivateKey = SMy7PJtM4aKGNIEZ9osnaz4cX5FvUBAWFHhAew/2DnI=
+ListenPort = 60032
+
+#Apps
+[Peer]
+PublicKey = AYNDzB1fqxCmBe7pdKZ6w7G2ln6TziBqDxKiZhDZ600=
+EndPoint = 188.166.36.75:60032
+AllowedIPs = 0.0.0.0/0
+
+
+// Config Apps //
+cd /etc/wireguard
+vim wg0.conf
+
+#Apps
+[Interface]
+PrivateKey = KMjqHgvE+PE7h6FjiNeYWDyydTPLLouNzsJq/Du6tUw=
+ListenPort = 60032
+
+#Tools
+[Peer]
+PublicKey = Xptm2lVsakGSD22fY/S6nbz4dOxGMxw07IXvV/8anFc=
+EndPoint = 188.166.26.176:60032
+AllowedIPs = 0.0.0.0/0
+
+Step 8: Add wg interface on both Tools and Apps
+
+For Tools
+ip link add dev wg1 type wireguard
+ip a s dev wg1
+ip a add 169.254.0.1 peer 169.254.0.3 dev wg1
+ip -br a s dev wg1
+wg setconf wg1 wg1.conf
+ip link set wg1 up
+
+For Apps
+ip link add dev wg0 type wireguard
+ip a s dev wg0
+ip a add 169.254.0.3 peer 169.254.0.1 dev wg0
+ip -br a s dev wg0
+wg setconf wg0 wg0.conf
+ip link set wg0 up
+
+
+Step 9: Check if we can ping this
+Tools: ping 169.254.0.3
+Apps: ping 169.254.0.1
+
+
+Step 10: Add Static Routes to let private 10.x.x.x/24 ping Spoke1 to Spoke2
+
+For all nodes 
+
+oneliner enable IP forwarding in sysctl.conf
+sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf ; sysctl -p
+
+// Load system parameters
+// sysctl -p
