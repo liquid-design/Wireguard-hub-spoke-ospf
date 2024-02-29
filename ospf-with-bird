@@ -1,0 +1,298 @@
+Step 11: OSPF time ;)
+** also a pretty good moment to take live snapshots **
+
+For All nodes
+apt install bird2 -y
+cd /etc/bird ; mv bird.conf bird.conf.org
+
+#Tools
+vim bird.conf
+
+router id 169.254.0.1;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "wg1" {};
+  };
+}
+
+chown bird:bird bird.conf
+
+#Check bird with commandline on Tools
+birdc
+bird> configure
+Reading configuration from /etc/bird/bird.conf
+Reconfiguration in progress
+
+bird> show ospf topology
+area 0.0.0.0
+
+	router 169.254.0.1
+		distance 0
+
+bird> show ospf neigh
+Router ID   	Pri	     State     	DTime	Interface  Router IP
+
+
+#Mail
+vim bird.conf
+
+router id 169.254.0.2;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "eth1" {};
+  };
+}
+
+chown bird:bird bird.conf
+ 
+#Apps
+vim bird.conf
+
+router id 169.254.0.3;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "eth1" {};
+  };
+}
+
+chown bird:bird bird.conf
+
+#Check bird with commandline on both Mail and Apps
+birdc
+bird> configure
+bird> show ospf topology
+area 0.0.0.0
+
+	router 169.254.0.1
+		distance 10
+		router 169.254.0.2 metric 10
+		router 169.254.0.3 metric 10
+
+	router 169.254.0.2
+		distance 20
+		router 169.254.0.1 metric 10
+
+	router 169.254.0.3
+		distance 0
+		router 169.254.0.1 metric 10
+
+bird> show ospf neigh
+wg4:
+Router ID   	Pri	     State     	DTime	Interface  Router IP
+169.254.0.1 	  1	Full/PtP  	39.524	wg0        169.254.0.1
+
+#Check bird topo and route on Tools 
+bird> show ospf topology 
+area 0.0.0.0
+
+	router 169.254.0.1
+		distance 0
+		router 169.254.0.2 metric 10
+		router 169.254.0.3 metric 10
+
+	router 169.254.0.2
+		distance 10
+		router 169.254.0.1 metric 10
+
+	router 169.254.0.3
+		distance 10
+		router 169.254.0.1 metric 10
+
+bird> show route
+Table master4:
+10.10.20.0/24        unicast [wg4 21:03:21.958] * I (150/20) [169.254.0.2]
+	via 169.254.0.2 on wg0
+10.10.30.0/24        unicast [wg4 21:02:54.957] * I (150/20) [169.254.0.3]
+	via 169.254.0.3 on wg1
+
+#Check network interface wg0
+tcpdump -v -ni wg0
+tcpdump: listening on wg0, link-type RAW (Raw IP), snapshot length 262144 bytes
+21:09:59.860682 IP (tos 0xc0, ttl 1, id 59835, offset 0, flags [none], proto OSPF (89), length 68)
+    169.254.0.1 > 224.0.0.5: OSPFv2, Hello, length 48
+	Router-ID 169.254.0.1, Backbone Area, Authentication Type: none (0)
+	Options [External]
+	  Hello Timer 10s, Dead Timer 40s, Mask 0.0.0.0, Priority 1
+	  Neighbor List:
+	    169.254.0.2
+21:10:00.979181 IP (tos 0xc0, ttl 1, id 12538, offset 0, flags [none], proto OSPF (89), length 68)
+    169.254.0.2 > 224.0.0.5: OSPFv2, Hello, length 48
+	Router-ID 169.254.0.2, Backbone Area, Authentication Type: none (0)
+	Options [External]
+	  Hello Timer 10s, Dead Timer 40s, Mask 0.0.0.0, Priority 1
+	  Neighbor List:
+	    169.254.0.1
+
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+
+
+Step 12: Cleanup configuration and share OSPF routes to kernel
+
+First add stub to the eth1 interface to stop forwarding and receiving hello messages to its own interface.
+
+#Mail
+vim bird.conf
+
+router id 169.254.0.2;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "eth1" {
+      stub;
+    };
+  };
+}
+ 
+#Apps
+vim bird.conf
+
+router id 169.254.0.3;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "eth1" {
+      stub;
+    };
+  };
+}
+
+
+#Tools 
+ip route 
+root@tools:/etc/bird# ip r
+default via 188.166.0.1 dev eth0 proto static
+10.10.10.0/24 dev eth1 proto kernel scope link src 10.10.10.2
+10.18.0.0/16 dev eth0 proto kernel scope link src 10.18.0.6
+169.254.0.2 dev wg0 proto kernel scope link src 169.254.0.1
+169.254.0.3 dev wg1 proto kernel scope link src 169.254.0.1
+188.166.0.0/18 dev eth0 proto kernel scope link src 188.166.26.176
+
+Tools geeft die 10.10.(20 en 30).x netwerken niet weer
+
+Stap 13: Bird onderhoud zijn eigen routing table. 
+Om de kernel table en de bird master table te synchroniseren doe je het volgende:
+
+#Tools
+vim bird.conf
+
+router id 169.254.0.1;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "wg1" {};
+  };
+}
+
+protocol kernel {
+  ipv4 {
+    import none;
+    export all;
+  };
+}
+
+Bij import none geen sync van kernel table naar bird master table
+Bij export all sync je bird master table naar de kernel table
+
+bird> show protocols
+Name       Proto      Table      State  Since         Info
+device1    Device     ---        up     20:48:58.027
+wg4        OSPF       master4    up     20:57:09.856  Running
+kernel1    Kernel     master4    up     21:55:04.341
+
+Controleer nu de routing table van de kernel
+
+ip r
+default via 188.166.0.1 dev eth0 proto static
+10.10.10.0/24 dev eth1 proto kernel scope link src 10.10.10.2.  //tada ;)
+10.10.20.0/24 via 169.254.0.2 dev wg0 proto bird metric 32.     //tada ;)
+10.10.30.0/24 via 169.254.0.3 dev wg1 proto bird metric 32.     //tada ;)
+10.18.0.0/16 dev eth0 proto kernel scope link src 10.18.0.6
+169.254.0.2 dev wg0 proto kernel scope link src 169.254.0.1
+169.254.0.3 dev wg1 proto kernel scope link src 169.254.0.1
+188.166.0.0/18 dev eth0 proto kernel scope link src 188.166.26.176
+
+
+Stap 14: Doe hetzelfde voor de Mail en Apps  
+
+
+#Mail
+vim bird.conf
+
+router id 169.254.0.2;
+
+protocol device {}
+
+protocol ospf wg4 {
+  ipv4 {
+    import where net !~ 10.10.10.0/24
+  }
+  area 0 {
+    interface "wg0" {};
+    interface "eth1" {
+      stub;
+    };
+  };
+}
+
+protocol kernel {
+  ipv4 {
+    import none;
+    export all;
+  };
+}
+ 
+#Apps
+vim bird.conf
+
+router id 169.254.0.3;
+
+protocol device {}
+
+protocol ospf wg4 {
+  area 0 {
+    interface "wg0" {};
+    interface "eth1" {
+      stub;
+    };
+  };
+}
+
+protocol kernel {
+  ipv4 {
+    import none;
+    export all;
+  };
+}
+
+Vergeet niet om de configuratie te laden
+bird> configure
+Reading configuration from /etc/bird/bird.conf
+Reconfigured
+
+Stap 15: Zorg dat wg een reboot overleeft
+
+Dit werkt niet en moet nog uitzoeken,... zucht het is laat :D
+systemctl enable wg-quick@wg0 && systemctl start wg-quick@wg0
